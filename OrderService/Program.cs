@@ -1,6 +1,8 @@
 
 using Microsoft.EntityFrameworkCore;
 using OrderService.Data;
+using OrderService.Extensions;
+using OrderService.Logging;
 using OrderService.Repositories;
 using OrderService.Services;
 
@@ -11,6 +13,7 @@ public class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        builder.AddAppLogging();
 
         // DB Context
         builder.Services.AddDbContext<OrderDbContext>(options =>
@@ -28,7 +31,7 @@ public class Program
         builder.Services.AddSwaggerGen();
 
         var app = builder.Build();
-
+        app.UseMiddleware<ActivityLogMiddleware>();
         // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
         {
