@@ -5,11 +5,11 @@ VisualStudioVersion = 17.8.34511.84
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{6821670D-FBB1-4F03-BFF4-45DDEBA6C959}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UserService", "UserService\UserService.csproj", "{1DFE682C-AC78-4E27-AD33-13AD80C9AC36}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UserService", "UserService\UserService.csproj", "{1DFE682C-AC78-4E27-AD33-13AD80C9AC36}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrderService", "OrderService\OrderService.csproj", "{D4E8EA73-3CD1-41EA-93EB-B9589A85E27A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OrderService", "OrderService\OrderService.csproj", "{D4E8EA73-3CD1-41EA-93EB-B9589A85E27A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PaymentService", "PaymentService\PaymentService.csproj", "{3CD34D8D-F9C9-4FC5-B755-AF0B14A99FB3}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "PaymentService", "PaymentService\PaymentService.csproj", "{3CD34D8D-F9C9-4FC5-B755-AF0B14A99FB3}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docker", "docker", "{3CD15FEF-A9F7-4BB5-9FB9-D992C8D409DD}"
 	ProjectSection(SolutionItems) = preProject
@@ -26,6 +26,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{
 	ProjectSection(SolutionItems) = preProject
 		ci.yml = ci.yml
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common.Auth", "Common.Auth\Common.Auth.csproj", "{0E7240DA-C78C-4163-B6B2-5AC054700474}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +47,10 @@ Global
 		{3CD34D8D-F9C9-4FC5-B755-AF0B14A99FB3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3CD34D8D-F9C9-4FC5-B755-AF0B14A99FB3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3CD34D8D-F9C9-4FC5-B755-AF0B14A99FB3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E7240DA-C78C-4163-B6B2-5AC054700474}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E7240DA-C78C-4163-B6B2-5AC054700474}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E7240DA-C78C-4163-B6B2-5AC054700474}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E7240DA-C78C-4163-B6B2-5AC054700474}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -56,6 +62,7 @@ Global
 		{A079FBFD-E427-4621-8EFA-AD70AD3C00D7} = {6821670D-FBB1-4F03-BFF4-45DDEBA6C959}
 		{93DD319D-30FD-4C39-8EEB-69E0D97ED9E6} = {A079FBFD-E427-4621-8EFA-AD70AD3C00D7}
 		{E0E8748B-DF92-421A-B776-D04EFD755712} = {607E5CE0-3DB8-4722-8389-3B5AC2D02561}
+		{0E7240DA-C78C-4163-B6B2-5AC054700474} = {6821670D-FBB1-4F03-BFF4-45DDEBA6C959}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {13AEF2FA-E57E-4D96-ACD6-BEDD9A0F8110}
