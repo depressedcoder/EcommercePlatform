@@ -53,7 +53,9 @@ namespace PaymentService
 
             builder.Services.Configure<BkashSettings>(builder.Configuration.GetSection("Bkash"));
             builder.Services.AddHttpClient<BkashClient>();
+
             builder.Services.AddScoped<IPaymentService, BkashPaymentService>();
+            builder.Services.AddScoped<IStripePaymentService, StripePaymentService>();
 
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();

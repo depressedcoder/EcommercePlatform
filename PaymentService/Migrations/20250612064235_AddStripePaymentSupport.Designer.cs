@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PaymentService.Data;
 
@@ -11,9 +12,11 @@ using PaymentService.Data;
 namespace PaymentService.Migrations
 {
     [DbContext(typeof(PaymentDbContext))]
-    partial class PaymentDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250612064235_AddStripePaymentSupport")]
+    partial class AddStripePaymentSupport
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -33,6 +36,7 @@ namespace PaymentService.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("BkashPaymentId")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("BkashToken")
@@ -55,9 +59,6 @@ namespace PaymentService.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("StripePaymentIntentId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("StripeSessionId")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("TokenIssuedAt")
