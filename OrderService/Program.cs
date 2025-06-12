@@ -8,7 +8,6 @@ using OrderService.Extensions;
 using OrderService.Logging;
 using OrderService.Repositories;
 using OrderService.Services;
-using System.Security.Claims;
 using System.Text;
 
 namespace OrderService;

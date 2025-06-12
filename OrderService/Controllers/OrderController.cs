@@ -53,7 +53,7 @@ public class OrderController : ControllerBase
         {
             UserId = Guid.Parse(userIdClaim),
             TotalAmount = request.TotalAmount,
-            Status = "Pending",
+            PaymentStatus = "Pending",
             CreatedAt = DateTime.UtcNow
         };
 
@@ -64,10 +64,22 @@ public class OrderController : ControllerBase
             Id = order.Id,
             UserId = order.UserId,
             TotalAmount = order.TotalAmount,
-            Status = order.Status,
+            Status = order.PaymentStatus,
             CreatedAt = order.CreatedAt
         };
 
         return Ok(response);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("update-payment-status")]
+    public async Task<IActionResult> UpdatePaymentStatus([FromBody] UpdateOrderStatusRequest request)
+    {
+        var order = await _service.GetOrderAsync(request.OrderId);
+        if (order == null) return NotFound();
+
+        order.PaymentStatus = request.PaymentStatus;
+        await _service.UpdateOrderAsync(order);
+        return Ok("Payment status updated");
     }
 }
