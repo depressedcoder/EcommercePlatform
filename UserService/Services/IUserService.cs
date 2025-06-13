@@ -8,4 +8,6 @@ public interface IUserService
     Task<bool> ValidateCredentialsAsync(string username, string password);
     Task CreateAsync(User user);
     Task<IEnumerable<User>> GetAllAsync();
+    Task UpdateUserAsync(User user);
+    Task DeleteUserAsync(string username);
 }
