@@ -1,11 +1,27 @@
 ﻿using OrderService.Logging;
+using Serilog;
 
 namespace OrderService.Extensions;
 
 public static class LoggingExtensions
 {
-    public static void AddAppLogging(this WebApplicationBuilder builder)
+    public static WebApplicationBuilder AddAppLogging(this WebApplicationBuilder builder)
     {
-        SerilogConfiguration.ConfigureSerilog(builder);
+        var logger = new LoggerConfiguration()
+            .ReadFrom.Configuration(builder.Configuration)
+            .Enrich.FromLogContext()
+            .Enrich.WithMachineName()
+            .Enrich.WithEnvironmentName()
+            .WriteTo.Console()
+            .WriteTo.File(
+                path: "Logs/orderservice-.log",
+                rollingInterval: RollingInterval.Day,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSerilog(logger);
+
+        return builder;
     }
 }
