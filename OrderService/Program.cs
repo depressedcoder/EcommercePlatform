@@ -17,8 +17,23 @@ public class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        // Logging first
         builder.AddAppLogging();
 
+        // Add services to the container
+        ConfigureServices(builder);
+
+        var app = builder.Build();
+
+        // Configure the HTTP request pipeline
+        ConfigureMiddleware(app);
+
+        app.Run();
+    }
+
+    private static void ConfigureServices(WebApplicationBuilder builder)
+    {
         // Configuration
         var keycloakSection = builder.Configuration.GetSection("Keycloak");
         var redisSection = builder.Configuration.GetSection("Redis");
@@ -26,18 +41,43 @@ public class Program
         builder.Services.Configure<RedisSettings>(redisSection);
 
         // Redis Cache
+        ConfigureRedisCache(builder, redisSection);
+
+        // Application Services
+        ConfigureApplicationServices(builder);
+
+        // Authentication & Authorization
+        ConfigureAuthentication(builder, keycloakSection);
+
+        // Database
+        ConfigureDatabase(builder);
+
+        // API Documentation
+        ConfigureSwagger(builder, keycloakSection);
+    }
+
+    private static void ConfigureRedisCache(WebApplicationBuilder builder, IConfigurationSection redisSection)
+    {
         builder.Services.AddStackExchangeRedisCache(options =>
         {
             options.Configuration = builder.Configuration.GetConnectionString("Redis");
             options.InstanceName = redisSection.Get<RedisSettings>()!.InstanceName;
         });
+    }
 
-        // Services
+    private static void ConfigureApplicationServices(WebApplicationBuilder builder)
+    {
         builder.Services.AddScoped<ICacheService, RedisCacheService>();
         builder.Services.AddScoped<IOrderRepository, OrderRepository>();
         builder.Services.AddScoped<IOrderService, OrderService.Services.OrderService>();
 
-        // Authorization
+        builder.Services.AddControllers();
+        builder.Services.AddEndpointsApiExplorer();
+    }
+
+    private static void ConfigureAuthentication(WebApplicationBuilder builder, IConfigurationSection keycloakSection)
+    {
+        // Authorization Policies
         builder.Services.AddAuthorization(options =>
         {
             options.AddPolicy("RequireAdminRole", policy =>
@@ -46,7 +86,7 @@ public class Program
                 policy.RequireRole("user"));
         });
 
-        // Authentication
+        // JWT Authentication
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
@@ -104,14 +144,16 @@ public class Program
                     }
                 };
             });
+    }
 
-        // EF Core: SQL Server
+    private static void ConfigureDatabase(WebApplicationBuilder builder)
+    {
         builder.Services.AddDbContext<OrderDbContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    }
 
-        // Controllers + Swagger
-        builder.Services.AddControllers();
-        builder.Services.AddEndpointsApiExplorer();
+    private static void ConfigureSwagger(WebApplicationBuilder builder, IConfigurationSection keycloakSection)
+    {
         builder.Services.AddSwaggerGen(options =>
         {
             options.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
@@ -148,9 +190,10 @@ public class Program
                 }
             });
         });
+    }
 
-        var app = builder.Build();
-
+    private static void ConfigureMiddleware(WebApplication app)
+    {
         // Apply migrations
         using (var scope = app.Services.CreateScope())
         {
@@ -166,8 +209,9 @@ public class Program
             app.UseSwagger();
             app.UseSwaggerUI(options =>
             {
-                options.OAuthClientId(keycloakSection.Get<KeycloakSettings>()!.ClientId);
-                options.OAuthClientSecret(keycloakSection.Get<KeycloakSettings>()!.ClientSecret);
+                var keycloakSettings = app.Configuration.GetSection("Keycloak").Get<KeycloakSettings>();
+                options.OAuthClientId(keycloakSettings!.ClientId);
+                options.OAuthClientSecret(keycloakSettings.ClientSecret);
                 options.OAuthUsePkce();
             });
         }
@@ -176,7 +220,5 @@ public class Program
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
-
-        app.Run();
     }
 }

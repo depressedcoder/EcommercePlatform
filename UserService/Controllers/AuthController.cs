@@ -2,7 +2,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 using UserService.DTO;
-using UserService.Models;
 using UserService.Services;
 
 namespace UserService.Controllers;

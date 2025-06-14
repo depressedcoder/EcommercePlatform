@@ -1,5 +1,4 @@
-﻿using OrderService.Logging;
-using Serilog;
+﻿using Serilog;
 
 namespace OrderService.Extensions;
 

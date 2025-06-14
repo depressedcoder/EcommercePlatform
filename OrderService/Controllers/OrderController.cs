@@ -31,7 +31,7 @@ public class OrderController : ControllerBase
         {
             var userId = User.GetUserId();
             var userEmail = User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
-            var userName = User.FindFirst(ClaimTypes.Name)?.Value ?? string.Empty;
+            var userName = User.FindFirst("preferred_username")?.Value ?? string.Empty;
 
             var order = await _orderService.CreateOrderAsync(orderDto, userId, userEmail, userName);
             return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, order);
