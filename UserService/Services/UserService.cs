@@ -1,6 +1,5 @@
 ﻿using UserService.Models;
 using UserService.Repositories;
-using UserService.Services;
 
 namespace UserService.Services;
 
@@ -32,12 +31,6 @@ public class UserService : IUserService
         }
 
         return user;
-    }
-
-    public async Task<bool> ValidateCredentialsAsync(string username, string password)
-    {
-        // Note: With Keycloak, this method is no longer needed as authentication is handled by Keycloak
-        throw new NotImplementedException("Authentication is now handled by Keycloak");
     }
 
     public async Task CreateAsync(User user)

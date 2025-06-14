@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using OrderService.DTO;
 using OrderService.Models;
 using OrderService.Services;
+using OrderService.Extensions;
 using System.Security.Claims;
 
 namespace OrderService.Controllers;
@@ -28,7 +29,7 @@ public class OrderController : ControllerBase
     {
         try
         {
-            var userId = GetUserId();
+            var userId = User.GetUserId();
             var userEmail = User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
             var userName = User.FindFirst(ClaimTypes.Name)?.Value ?? string.Empty;
 
@@ -37,7 +38,7 @@ public class OrderController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating order for user {UserId}", GetUserId());
+            _logger.LogError(ex, "Error creating order for user {UserId}", User.GetUserId());
             return StatusCode(500, "An error occurred while creating the order");
         }
     }
@@ -54,7 +55,7 @@ public class OrderController : ControllerBase
             }
 
             // Check if user is authorized to view this order
-            if (order.UserId != GetUserId() && !User.IsInRole("admin"))
+            if (order.UserId != User.GetUserId() && !User.IsInRole("admin"))
             {
                 return Forbid();
             }
@@ -73,12 +74,12 @@ public class OrderController : ControllerBase
     {
         try
         {
-            var orders = await _orderService.GetUserOrdersAsync(GetUserId());
+            var orders = await _orderService.GetUserOrdersAsync(User.GetUserId());
             return Ok(orders);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving orders for user {UserId}", GetUserId());
+            _logger.LogError(ex, "Error retrieving orders for user {UserId}", User.GetUserId());
             return StatusCode(500, "An error occurred while retrieving orders");
         }
     }
@@ -154,15 +155,5 @@ public class OrderController : ControllerBase
             _logger.LogError(ex, "Error deleting order {OrderId}", id);
             return StatusCode(500, "An error occurred while deleting the order");
         }
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
-            throw new InvalidOperationException("User ID not found or invalid in claims");
-        }
-        return userId;
     }
 }
