@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using UserService.Config;
@@ -239,6 +240,235 @@ public class KeycloakService : IKeycloakService
         return roles?.Select(r => r.name) ?? Array.Empty<string>();
     }
 
+    public async Task<RegistrationResponseDto> RegisterUserAsync(UserRegistrationDto dto)
+    {
+        // First create the user in Keycloak
+        var keycloakUser = new
+        {
+            username = dto.Username,
+            email = dto.Email,
+            enabled = true,
+            emailVerified = false,
+            firstName = dto.FullName.Split(' ').FirstOrDefault(),
+            lastName = dto.FullName.Split(' ').Skip(1).FirstOrDefault() ?? "",
+            attributes = dto.Attributes ?? new Dictionary<string, string>(),
+            credentials = new[]
+            {
+                new
+                {
+                    type = "password",
+                    value = dto.Password,
+                    temporary = false
+                }
+            }
+        };
+
+        var token = await GetAdminTokenAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await _httpClient.PostAsJsonAsync($"/admin/realms/{Realm}/users", keycloakUser);
+        response.EnsureSuccessStatusCode();
+
+        // Get the location header (contains the new user ID)
+        var location = response.Headers.Location?.ToString();
+        var userId = location?.Split('/').Last();
+
+        if (string.IsNullOrEmpty(userId))
+            throw new Exception("Failed to get user ID after registration");
+
+        // Assign default role ("user")
+        var rolesResponse = await _httpClient.GetAsync($"/admin/realms/{Realm}/roles");
+        rolesResponse.EnsureSuccessStatusCode();
+        var allRoles = await rolesResponse.Content.ReadFromJsonAsync<List<KeycloakRole>>();
+        var userRole = allRoles!.FirstOrDefault(r => r.name == "user");
+
+        if (userRole != null)
+        {
+            var assignResponse = await _httpClient.PostAsJsonAsync(
+                $"/admin/realms/{Realm}/users/{userId}/role-mappings/realm",
+                new[] { userRole }
+            );
+            assignResponse.EnsureSuccessStatusCode();
+        }
+        // Sync user data to our database
+        await SyncUserFromKeycloakAsync(userId);
+        // Trigger email verification 
+        await VerifyEmailAsync(userId, "");
+
+        return new RegistrationResponseDto
+        {
+            Message = "Registration successful. Please check your email to verify your account before logging in."
+        };
+    }
+
+    public async Task<TokenResponseDto> LoginUserAsync(LoginDto dto)
+    {
+        // Fetch user from Keycloak to check email verification
+        var user = await GetUserFromKeycloakByUsernameAsync(dto.Username);
+        if (user == null || !(user.EmailVerified ?? false))
+        {
+            throw new Exception("Please verify your email before logging in.");
+        }
+
+        var tokenRequest = new Dictionary<string, string>
+        {
+            ["grant_type"] = "password",
+            ["client_id"] = _settings.ClientId,
+            ["client_secret"] = _settings.ClientSecret,
+            ["username"] = dto.Username,
+            ["password"] = dto.Password
+        };
+
+        var response = await _httpClient.PostAsync(
+            $"/realms/{Realm}/protocol/openid-connect/token",
+            new FormUrlEncodedContent(tokenRequest));
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Login failed. Status: {response.StatusCode}, Error: {error}");
+        }
+
+        var tokenResponse = await response.Content.ReadFromJsonAsync<TokenResponse>();
+        if (tokenResponse?.AccessToken == null)
+            throw new Exception("Failed to get access token");
+
+        return new TokenResponseDto
+        {
+            AccessToken = tokenResponse.AccessToken,
+            RefreshToken = tokenResponse.RefreshToken ?? throw new Exception("No refresh token received"),
+            ExpiresIn = tokenResponse.ExpiresIn,
+            TokenType = tokenResponse.TokenType
+        };
+    }
+
+    public async Task<bool> LogoutAsync(string refreshToken, string? username = null)
+    {
+        // Revoke the refresh token in Keycloak
+        var tokenRequest = new Dictionary<string, string>
+        {
+            ["client_id"] = _settings.ClientId,
+            ["client_secret"] = _settings.ClientSecret,
+            ["refresh_token"] = refreshToken
+        };
+
+        var response = await _httpClient.PostAsync(
+            $"/realms/{Realm}/protocol/openid-connect/logout",
+            new FormUrlEncodedContent(tokenRequest));
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(username))
+        {
+            // Remove app user cache
+            await _cacheService.RemoveAsync($"user:{username}");
+
+            // Remove Keycloak user cache by userId
+            var keycloakUser = await GetUserFromKeycloakByUsernameAsync(username);
+            if (keycloakUser != null)
+                await _cacheService.RemoveAsync($"keycloak_user:{keycloakUser.Id}");
+        }
+
+        return true;
+    }
+
+    public async Task<TokenResponseDto> RefreshTokenAsync(string refreshToken)
+    {
+        var tokenRequest = new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = _settings.ClientId,
+            ["client_secret"] = _settings.ClientSecret,
+            ["refresh_token"] = refreshToken
+        };
+
+        var response = await _httpClient.PostAsync(
+            $"/realms/{Realm}/protocol/openid-connect/token",
+            new FormUrlEncodedContent(tokenRequest));
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Token refresh failed. Status: {response.StatusCode}, Error: {error}");
+        }
+
+        var tokenResponse = await response.Content.ReadFromJsonAsync<TokenResponse>();
+        if (tokenResponse?.AccessToken == null)
+            throw new Exception("Failed to refresh token");
+
+        return new TokenResponseDto
+        {
+            AccessToken = tokenResponse.AccessToken,
+            RefreshToken = tokenResponse.RefreshToken ?? throw new Exception("No refresh token received"),
+            ExpiresIn = tokenResponse.ExpiresIn,
+            TokenType = tokenResponse.TokenType
+        };
+    }
+
+    public async Task<bool> ResetPasswordAsync(string userId, string newPassword)
+    {
+        var token = await GetAdminTokenAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var passwordReset = new
+        {
+            type = "password",
+            value = newPassword,
+            temporary = false
+        };
+
+        var response = await _httpClient.PutAsJsonAsync(
+            $"/admin/realms/{Realm}/users/{userId}/reset-password",
+            passwordReset);
+
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> SendPasswordResetEmailAsync(string email)
+    {
+        var adminToken = await GetAdminTokenAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        // First find the user by email
+        var response = await _httpClient.GetAsync($"/admin/realms/{Realm}/users?email={Uri.EscapeDataString(email)}");
+        if (!response.IsSuccessStatusCode)
+            return false;
+
+        var users = await response.Content.ReadFromJsonAsync<List<KeycloakUser>>();
+        var user = users?.FirstOrDefault();
+        if (user == null)
+            return false;
+
+        // Send password reset email
+        var resetResponse = await _httpClient.PutAsync(
+            $"/admin/realms/{Realm}/users/{user.Id}/execute-actions-email",
+            new StringContent(
+                JsonSerializer.Serialize(new[] { "UPDATE_PASSWORD" }), 
+                System.Text.Encoding.UTF8, 
+                "application/json"));
+
+        return resetResponse.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> VerifyEmailAsync(string userId, string verificationToken)
+    {
+        var adminToken = await GetAdminTokenAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        var response = await _httpClient.PutAsync(
+            $"/admin/realms/{Realm}/users/{userId}/execute-actions-email",
+            new StringContent(
+                JsonSerializer.Serialize(new[] { "VERIFY_EMAIL" }), 
+                System.Text.Encoding.UTF8, 
+                "application/json"));
+
+        return response.IsSuccessStatusCode;
+    }
+
     private async Task<string> GetAdminTokenAsync()
     {
         var cacheKey = $"{TokenCachePrefix}admin";
@@ -274,6 +504,17 @@ public class KeycloakService : IKeycloakService
         return tokenResponse.AccessToken;
     }
 
+    private async Task<KeycloakUser?> GetUserFromKeycloakByUsernameAsync(string username)
+    {
+        var token = await GetAdminTokenAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var response = await _httpClient.GetAsync($"/admin/realms/{Realm}/users?username={Uri.EscapeDataString(username)}");
+        if (!response.IsSuccessStatusCode)
+            return null;
+        var users = await response.Content.ReadFromJsonAsync<List<KeycloakUser>>();
+        return users?.FirstOrDefault();
+    }
+
     private User MapToUser(KeycloakUser keycloakUser)
     {
         return new User
@@ -298,6 +539,7 @@ public class KeycloakService : IKeycloakService
         public bool Enabled { get; set; }
         public Dictionary<string, string>? Attributes { get; set; }
         public List<string>? RealmRoles { get; set; }
+        public bool? EmailVerified { get; set; }
     }
 
     private class KeycloakRole
@@ -318,6 +560,9 @@ public class KeycloakService : IKeycloakService
     {
         [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = null!;
+
+        [JsonPropertyName("refresh_token")]
+        public string? RefreshToken { get; set; }
 
         [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
