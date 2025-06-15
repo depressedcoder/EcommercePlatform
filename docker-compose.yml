@@ -2,16 +2,25 @@ version: '3.8'
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0.1
+    image: quay.io/keycloak/keycloak:22.0.5
     container_name: keycloak
-    ports:
-      - "8080:8080"
+    command: start-dev --http-enabled=true --http-port=8080 --hostname-strict=false
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-    command: start-dev
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
     networks:
       - ecommerce-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -21,17 +30,38 @@ services:
     environment:
       SA_PASSWORD: "YourStrong@Password1"
       ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
     networks:
       - ecommerce-net
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "YourStrong@Password1" -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     networks:
       - ecommerce-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   ecommerce-net:
-    driver: bridges
+    driver: bridge
+
+volumes:
+  keycloak_data:
+  sqlserver_data:
+  redis_data:

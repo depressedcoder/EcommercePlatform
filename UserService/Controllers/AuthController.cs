@@ -1,10 +1,7 @@
-﻿using Common.Auth.Jwt;
-using Common.Auth.Models;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using UserService.Models;
+using UserService.DTO;
 using UserService.Services;
 
 namespace UserService.Controllers;
@@ -14,98 +11,221 @@ namespace UserService.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IUserService _userService;
-    private readonly JwtTokenGenerator _tokenGenerator;
+    private readonly IKeycloakService _keycloakService;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IUserService userService, JwtTokenGenerator tokenGenerator)
+    public AuthController(
+        IUserService userService,
+        IKeycloakService keycloakService,
+        ILogger<AuthController> logger)
     {
         _userService = userService;
-        _tokenGenerator = tokenGenerator;
-    }
-
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] AuthRequest request)
-    {
-        var isValid = await _userService.ValidateCredentialsAsync(request.Username, request.Password);
-        if (!isValid) return Unauthorized("Invalid username or password.");
-
-        var user = await _userService.GetByUsernameAsync(request.Username);
-        var token = _tokenGenerator.GenerateToken(new AppUser
-        {
-            Id = user!.Id,
-            Username = user!.Username,
-            Email = user.Email,
-            FullName = user.FullName,
-            Role = user.Role
-        });
-
-        return Ok(new AuthResponse { Token = token, Role = user.Role });
-    }
-
-    [HttpPost("register")]
-    [AllowAnonymous]
-    public async Task<IActionResult> Register([FromBody] AuthRequest request)
-    {
-        var existing = await _userService.GetByUsernameAsync(request.Username);
-        if (existing != null)
-            return BadRequest("Username already exists");
-
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            Username = request.Username,
-            Email = $"{request.Username}@demo.com",
-            FullName = request.Username,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Role = "User"
-        };
-
-        await _userService.CreateAsync(user); // ⬅️ add this method in IUserService
-        return Ok("User created");
+        _keycloakService = keycloakService;
+        _logger = logger;
     }
 
     [HttpGet("me")]
-    [Authorize] // anyone with valid token
-    public IActionResult Me()
+    [Authorize]
+    public async Task<IActionResult> Me()
     {
-        var username = User.Identity?.Name; // Comes from JwtRegisteredClaimNames.Sub
-        var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var email = User.FindFirst(ClaimTypes.Email)?.Value;        
-        var fullname = User.FindFirst("fullname")?.Value;          
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized();
 
-        var expUnix = User.FindFirst(JwtRegisteredClaimNames.Exp)?.Value;
+        // Sync user from Keycloak to our database
+        await _keycloakService.SyncUserFromKeycloakAsync(userId);
 
-        DateTime? expiresAt = null;
-        if (long.TryParse(expUnix, out var expSeconds))
-        {
-            expiresAt = DateTimeOffset.FromUnixTimeSeconds(expSeconds).UtcDateTime;
-        }
+        var user = await _userService.GetByUsernameAsync(User.Identity?.Name ?? string.Empty);
+        if (user == null)
+            return NotFound();
 
         return Ok(new
         {
-            Username = username,
-            FullName = fullname,
-            Email = email,
-            Role = role,
-            ExpiresAtUtc = expiresAt
+            user.Id,
+            user.Username,
+            user.Email,
+            user.FullName,
+            user.Roles,
+            user.Attributes,
+            user.IsActive,
+            user.LastLoginAt
         });
     }
 
-    [HttpGet("/admin/users")]
-    [Authorize(Roles = "Admin")]
+    [HttpGet("users")]
+    [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> GetAllUsers()
     {
         var users = await _userService.GetAllAsync();
-
-        var response = users.Select(u => new
+        return Ok(users.Select(u => new
         {
             u.Id,
             u.Username,
             u.Email,
             u.FullName,
-            u.Role,
-            u.CreatedAt
-        });
+            u.Roles,
+            u.IsActive,
+            u.CreatedAt,
+            u.LastLoginAt
+        }));
+    }
 
-        return Ok(response);
+    [HttpGet("users/{userId}")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> GetUser(string userId)
+    {
+        var user = await _keycloakService.GetUserFromKeycloakAsync(userId);
+        if (user == null)
+            return NotFound();
+
+        return Ok(user);
+    }
+
+    [HttpPost("users")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> CreateUser([FromBody] CreateUserDto dto)
+    {
+        var keycloakUserId = await _keycloakService.CreateUserInKeycloakAsync(dto);
+
+        await _keycloakService.SyncUserFromKeycloakAsync(keycloakUserId);
+
+        var user = await _userService.GetByUsernameAsync(dto.Username);
+        return CreatedAtAction(nameof(GetUser), new { userId = keycloakUserId }, user);
+    }
+
+    [HttpPut("users/{userId}")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> UpdateUser(string userId, [FromBody] UpdateUserDto dto)
+    {
+        await _keycloakService.UpdateUserInKeycloakAsync(userId, dto);
+
+        await _keycloakService.SyncUserFromKeycloakAsync(userId);
+
+        var user = await _userService.GetByUsernameAsync(dto.Username);
+        if (user == null)
+            return NotFound();
+
+        return Ok(user);
+    }
+
+    [HttpDelete("users/{userId}")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> DeleteUser(string userId)
+    {
+        var existing = await _keycloakService.GetUserFromKeycloakAsync(userId);
+        if (existing == null)
+            return NotFound();
+
+        await _keycloakService.DeleteUserFromKeycloakAsync(userId);
+        await _userService.DeleteUserAsync(existing.Username);
+        return NoContent();
+    }
+
+    [HttpGet("users/{userId}/roles")]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> GetUserRoles(string userId)
+    {
+        var roles = await _keycloakService.GetUserRolesAsync(userId);
+        return Ok(roles);
+    }
+
+    [HttpPost("register")]
+    [AllowAnonymous]
+    public async Task<ActionResult<RegistrationResponseDto>> Register([FromBody] UserRegistrationDto dto)
+    {
+        try
+        {
+            var response = await _keycloakService.RegisterUserAsync(dto);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during user registration");
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("login")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TokenResponseDto>> Login([FromBody] LoginDto dto)
+    {
+        try
+        {
+            var tokenResponse = await _keycloakService.LoginUserAsync(dto);
+            return Ok(tokenResponse);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during user login");
+            return Unauthorized(new { message = "Invalid username or password." });
+        }
+    }
+
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout([FromBody] LogoutDto dto)
+    {
+        var username = User.Identity?.Name;
+        var result = await _keycloakService.LogoutAsync(dto.RefreshToken, username);
+        if (result)
+            return Ok(new { message = "Logout successful." });
+        else
+            return BadRequest(new { message = "Logout failed. Please try again." });
+    }
+
+    [HttpPost("refresh-token")]
+    [AllowAnonymous]
+    public async Task<ActionResult<TokenResponseDto>> RefreshToken([FromBody] RefreshTokenDto dto)
+    {
+        try
+        {
+            var tokenResponse = await _keycloakService.RefreshTokenAsync(dto.RefreshToken);
+            return Ok(tokenResponse);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing token");
+            return Unauthorized(new { message = "Invalid refresh token." });
+        }
+    }
+
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<ActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
+    {
+        try
+        {
+            var result = await _keycloakService.SendPasswordResetEmailAsync(dto.Email);
+            if (result)
+            {
+                return Ok(new { message = "Password reset instructions have been sent to your email." });
+            }
+            return NotFound(new { message = "No account found with this email address." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending password reset email");
+            return BadRequest(new { message = "Failed to process password reset request." });
+        }
+    }
+
+    [HttpPost("verify-email")]
+    [AllowAnonymous]
+    public async Task<ActionResult> VerifyEmail([FromBody] VerifyEmailDto dto)
+    {
+        try
+        {
+            var result = await _keycloakService.VerifyEmailAsync(dto.UserId, dto.Token);
+            if (result)
+            {
+                return Ok(new { message = "Email verified successfully." });
+            }
+            return BadRequest(new { message = "Email verification failed." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error verifying email");
+            return BadRequest(new { message = "Failed to verify email." });
+        }
     }
 }
