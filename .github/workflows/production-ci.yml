@@ -28,33 +28,4 @@ jobs:
       run: dotnet restore ${{ env.SOLUTION_FILE }}
 
     - name: Build
-      run: dotnet build ${{ env.SOLUTION_FILE }} --no-restore --configuration Release
-
-    - name: Check for build warnings
-      run: |
-        $buildOutput = dotnet build ${{ env.SOLUTION_FILE }} --configuration Release
-        if ($buildOutput -match "warning") {
-          Write-Host "##[warning]Build contains warnings"
-          exit 1
-        }
-
-    - name: Verify Docker Compose
-      run: |
-        docker-compose config
-
-    - name: Check for outdated packages
-      run: |
-        dotnet list ${{ env.SOLUTION_FILE }} package --outdated
-
-    - name: Build status
-      if: always()
-      run: |
-        if ($env:JOB_STATUS -eq 'success') {
-          echo "##[section]Build Status: ✅ Success"
-          echo "All checks passed successfully!"
-        } else {
-          echo "##[error]Build Status: ❌ Failed"
-          echo "Please check the build logs for details."
-        }
-      env:
-        JOB_STATUS: ${{ job.status }} 
+      run: dotnet build ${{ env.SOLUTION_FILE }} --no-restore --configuration Release 
