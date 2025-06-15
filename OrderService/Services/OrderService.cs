@@ -15,4 +15,5 @@ public class OrderService : IOrderService
     public async Task<IEnumerable<Order>> GetOrdersAsync() => await _repo.GetAllAsync();
     public async Task<Order?> GetOrderAsync(int id) => await _repo.GetByIdAsync(id);
     public async Task PlaceOrderAsync(Order order) => await _repo.CreateAsync(order);
+    public async Task UpdateOrderAsync(Order order) => await _repo.UpdateOrderAsync(order);
 }

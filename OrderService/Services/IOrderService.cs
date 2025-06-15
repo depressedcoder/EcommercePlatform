@@ -7,4 +7,5 @@ public interface IOrderService
     Task<IEnumerable<Order>> GetOrdersAsync();
     Task<Order?> GetOrderAsync(int id);
     Task PlaceOrderAsync(Order order);
+    Task UpdateOrderAsync(Order order);
 }
