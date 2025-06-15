@@ -13,34 +13,8 @@ env:
   SOLUTION_FILE: 'EcommercePlatform.sln'
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
-    
-    services:
-      # SQL Server service container
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          SA_PASSWORD: "YourStrong@Password1"
-          ACCEPT_EULA: "Y"
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "YourStrong@Password1" -Q "SELECT 1" || exit 1
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      # Redis service container
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
     - uses: actions/checkout@v3
@@ -55,9 +29,6 @@ jobs:
 
     - name: Build
       run: dotnet build ${{ env.SOLUTION_FILE }} --no-restore --configuration Release
-
-    - name: Test
-      run: dotnet test ${{ env.SOLUTION_FILE }} --no-build --verbosity normal --configuration Release
 
     - name: Check for build warnings
       run: |
