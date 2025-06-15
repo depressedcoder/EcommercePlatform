@@ -1,20 +1,35 @@
-﻿using PaymentService.Enums;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using PaymentService.Enums;
 
 namespace PaymentService.Models;
 
 public class Payment
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
+    [Key]
+    public int Id { get; set; }
+
+    [Required]
     public int OrderId { get; set; }
-    public string Amount { get; set; } = null!;
-    public string Status { get; set; } = "Pending";
-    public string? TrxId { get; set; }
-    public string? BkashPaymentId { get; set; }
-    public string? BkashToken { get; set; }
-    public DateTime? TokenIssuedAt { get; set; }
-    public string? StripePaymentIntentId { get; set; }
-    public string? StripeSessionId { get; set; }
-    public string? StripeClientSecret { get; set; }
-    public PaymentProvider PaymentProvider { get; set; }
+
+    [Required]
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    [Required]
+    public PaymentMethod PaymentMethod { get; set; }
+
+    [Required]
+    public PaymentStatus Status { get; set; }
+
+    [Required]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? UpdatedAt { get; set; }
+
+    [MaxLength(100)]
+    public string? TransactionId { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 }

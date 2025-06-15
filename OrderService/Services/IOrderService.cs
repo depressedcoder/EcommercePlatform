@@ -12,4 +12,5 @@ public interface IOrderService
     Task<OrderResponseDto> UpdateOrderStatusAsync(int id, UpdateOrderStatusDto statusDto);
     Task<bool> DeleteOrderAsync(int id);
     Task<IEnumerable<OrderResponseDto>> GetOrdersByStatusAsync(OrderStatus status);
+    Task<OrderResponseDto> UpdatePaymentStatusAsync(int orderId, UpdatePaymentStatusDto paymentStatusDto);
 }

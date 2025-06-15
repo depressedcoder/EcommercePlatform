@@ -6,40 +6,44 @@ namespace PaymentService.Logging;
 public class ActivityLogMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly ILogger<ActivityLogMiddleware> _logger;
 
-    public ActivityLogMiddleware(RequestDelegate next) => _next = next;
+    public ActivityLogMiddleware(RequestDelegate next, ILogger<ActivityLogMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var stopwatch = Stopwatch.StartNew();
-        var user = context.User.Identity?.IsAuthenticated == true ? context.User.Identity?.Name : "Anonymous";
-
-        var request = context.Request;
-        var method = request.Method;
-        var path = request.Path;
-        var ip = context.Connection.RemoteIpAddress?.ToString();
-
-        string body = string.Empty;
-        if (method == "POST" || method == "PUT")
+        var sw = Stopwatch.StartNew();
+        try
         {
-            request.EnableBuffering();
-            using var reader = new StreamReader(request.Body, leaveOpen: true);
-            body = await reader.ReadToEndAsync();
-            request.Body.Position = 0;
+            _logger.LogInformation(
+                "Request started: {Method} {Path}",
+                context.Request.Method,
+                context.Request.Path);
+
+            await _next(context);
+
+            sw.Stop();
+            _logger.LogInformation(
+                "Request completed: {Method} {Path} - Status: {StatusCode} - Time: {ElapsedMs}ms",
+                context.Request.Method,
+                context.Request.Path,
+                context.Response.StatusCode,
+                sw.ElapsedMilliseconds);
         }
-
-        await _next(context);
-        stopwatch.Stop();
-
-        Log.Information("AUDIT | {Timestamp} | {User} | {Method} {Path} | IP: {IP} | Status: {StatusCode} | {ElapsedMs}ms | Payload: {Payload}",
-            DateTime.UtcNow,
-            user,
-            method,
-            path,
-            ip,
-            context.Response.StatusCode,
-            stopwatch.ElapsedMilliseconds,
-            body
-        );
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(
+                ex,
+                "Request failed: {Method} {Path} - Time: {ElapsedMs}ms",
+                context.Request.Method,
+                context.Request.Path,
+                sw.ElapsedMilliseconds);
+            throw;
+        }
     }
 }

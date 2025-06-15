@@ -36,4 +36,19 @@ public class UpdateOrderStatusDto
     
     [MaxLength(500)]
     public string? Notes { get; set; }
+}
+
+public class UpdatePaymentStatusDto
+{
+    [Required]
+    public string PaymentId { get; set; } = string.Empty;
+
+    [Required]
+    public string TransactionId { get; set; } = string.Empty;
+
+    [Required]
+    public string PaymentStatus { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 } 

@@ -156,4 +156,23 @@ public class OrderController : ControllerBase
             return StatusCode(500, "An error occurred while deleting the order");
         }
     }
+
+    [HttpPatch("{id}/payment-status")]
+    public async Task<ActionResult<OrderResponseDto>> UpdatePaymentStatus(int id, UpdatePaymentStatusDto paymentStatusDto)
+    {
+        try
+        {
+            var order = await _orderService.UpdatePaymentStatusAsync(id, paymentStatusDto);
+            return Ok(order);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating payment status for order {OrderId}", id);
+            return StatusCode(500, "An error occurred while updating the payment status");
+        }
+    }
 }

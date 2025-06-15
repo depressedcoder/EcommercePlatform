@@ -80,6 +80,38 @@ public class OrderService : IOrderService
         return orders.Select(MapToOrderResponseDto);
     }
 
+    public async Task<OrderResponseDto> UpdatePaymentStatusAsync(int orderId, UpdatePaymentStatusDto paymentStatusDto)
+    {
+        _logger.LogInformation("Updating payment status for order {OrderId}", orderId);
+
+        var order = await _orderRepository.GetByIdAsync(orderId);
+        if (order == null)
+        {
+            throw new KeyNotFoundException($"Order with ID {orderId} not found");
+        }
+
+        order.PaymentId = paymentStatusDto.PaymentId;
+        order.TransactionId = paymentStatusDto.TransactionId;
+        order.PaymentStatus = paymentStatusDto.PaymentStatus;
+        order.Notes = paymentStatusDto.Notes ?? order.Notes;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        // Update order status based on payment status
+        order.Status = paymentStatusDto.PaymentStatus.ToLower() switch
+        {
+            "completed" or "success" => OrderStatus.Paid,
+            "failed" or "error" => OrderStatus.Failed,
+            "cancelled" => OrderStatus.Cancelled,
+            _ => OrderStatus.Processing
+        };
+
+        var updatedOrder = await _orderRepository.UpdateAsync(order);
+        _logger.LogInformation("Updated payment status for order {OrderId} to {PaymentStatus}", 
+            orderId, paymentStatusDto.PaymentStatus);
+
+        return MapToOrderResponseDto(updatedOrder);
+    }
+
     private static OrderResponseDto MapToOrderResponseDto(Order order)
     {
         return new OrderResponseDto

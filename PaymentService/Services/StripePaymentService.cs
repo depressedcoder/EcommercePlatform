@@ -1,32 +1,59 @@
-﻿using Microsoft.EntityFrameworkCore;
-using PaymentService.Data;
-using PaymentService.DTO;
-using PaymentService.Enums;
+﻿using PaymentService.DTO;
 using PaymentService.Models;
 using Stripe;
 using Stripe.Checkout;
+using PaymentService.Clients;
+using PaymentService.Config;
+using PaymentService.Repositories;
+using Microsoft.Extensions.Options;
+using PaymentService.Enums;
 
 namespace PaymentService.Services
 {
     public class StripePaymentService : IStripePaymentService
     {
-        private readonly IConfiguration _config;
-        private readonly PaymentDbContext _context;
+        private readonly IPaymentRepository _paymentRepository;
+        private readonly IOrderServiceClient _orderServiceClient;
         private readonly ILogger<StripePaymentService> _logger;
-        private readonly HttpClient _http;
+        private readonly StripeSettings _stripeSettings;
 
-        public StripePaymentService(IConfiguration config, PaymentDbContext context, HttpClient http, ILogger<StripePaymentService> logger)
+        public StripePaymentService(
+            IPaymentRepository paymentRepository,
+            IOrderServiceClient orderServiceClient,
+            IOptions<StripeSettings> stripeSettings,
+            ILogger<StripePaymentService> logger)
         {
-            _config = config;
-            _context = context;
+            _paymentRepository = paymentRepository;
+            _orderServiceClient = orderServiceClient;
             _logger = logger;
-            _http = http;
-
-            StripeConfiguration.ApiKey = _config["Stripe:SecretKey"];
+            _stripeSettings = stripeSettings.Value;
+            StripeConfiguration.ApiKey = _stripeSettings.SecretKey;
         }
 
         public async Task<string> CreateCheckoutSessionAsync(StripeCheckoutRequest request)
         {
+            _logger.LogInformation("Creating Stripe checkout session for OrderId: {OrderId}", request.OrderId);
+
+            // Check for existing completed payment
+            var existingPayment = await _paymentRepository.GetByOrderIdAsync(request.OrderId);
+            if (existingPayment != null && existingPayment.Status == PaymentStatus.Completed)
+            {
+                _logger.LogInformation("Payment already completed for OrderId: {OrderId}", request.OrderId);
+                return $"Payment already completed for OrderId: {request.OrderId}.";
+            }
+
+            var payment = new Payment
+            {
+                OrderId = request.OrderId,
+                Amount = request.Amount,
+                PaymentMethod = Enums.PaymentMethod.Stripe,
+                Status = PaymentStatus.Pending,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            var createdPayment = await _paymentRepository.CreateAsync(payment);
+            _logger.LogInformation("Created payment record with ID: {PaymentId}", createdPayment.Id);
+
             var options = new SessionCreateOptions
             {
                 PaymentMethodTypes = new List<string> { "card" },
@@ -36,84 +63,99 @@ namespace PaymentService.Services
                     {
                         PriceData = new SessionLineItemPriceDataOptions
                         {
-                            Currency = request.Currency,
-                            UnitAmount = (long)(request.Amount * 100),
+                            Currency = "usd",
+                            UnitAmount = (long)(request.Amount * 100), // Convert to cents
                             ProductData = new SessionLineItemPriceDataProductDataOptions
                             {
-                                Name = $"Order #{request.OrderId}"
+                                Name = $"Order #{request.OrderId}",
+                                Description = "Payment for your order"
                             }
                         },
                         Quantity = 1
                     }
                 },
                 Mode = "payment",
+                SuccessUrl = $"{_stripeSettings.SuccessUrl}?session_id={{CHECKOUT_SESSION_ID}}",
+                CancelUrl = $"{_stripeSettings.CancelUrl}?order_id={request.OrderId}",
                 Metadata = new Dictionary<string, string>
                 {
-                    { "OrderId", request.OrderId.ToString() }
-                },
-                SuccessUrl = "https://localhost:4200/payment-success?session_id={CHECKOUT_SESSION_ID}",
-                CancelUrl = "https://localhost:4200/payment-cancel"
+                    { "orderId", request.OrderId.ToString() },
+                    { "paymentId", createdPayment.Id.ToString() }
+                }
             };
 
             var service = new SessionService();
             var session = await service.CreateAsync(options);
 
-            // Save session ID temporarily
-            var payment = new Payment
-            {
-                Id = Guid.NewGuid(),
-                OrderId = request.OrderId,
-                Amount = request.Amount.ToString(),
-                PaymentProvider = PaymentProvider.Stripe,
-                Status = "Pending",
-                StripeSessionId = session.Id,
-                CreatedAt = DateTime.UtcNow
-            };
+            createdPayment.TransactionId = session.Id;
+            await _paymentRepository.UpdateAsync(createdPayment);
 
-            _context.Payments.Add(payment);
-            await _context.SaveChangesAsync();
+            _logger.LogInformation("Created Stripe session {SessionId} for OrderId: {OrderId}", 
+                session.Id, request.OrderId);
 
-            return session.Url!;
+            return session.Url;
         }
 
-        public async Task<bool> ConfirmCheckoutByOrderAsync(int orderId)
+        public async Task<PaymentConfirmationResult> ConfirmCheckoutByOrderAsync(int orderId)
         {
-            var payment = await _context.Payments
-                .OrderByDescending(p => p.CreatedAt) // in case of retries
-                .FirstOrDefaultAsync(p => p.OrderId == orderId && p.PaymentProvider == PaymentProvider.Stripe);
+            _logger.LogInformation("Confirming Stripe payment for OrderId: {OrderId}", orderId);
 
-            if (payment == null || string.IsNullOrWhiteSpace(payment.StripeSessionId))
-                return false;
-
-            var sessionService = new SessionService();
-            var session = await sessionService.GetAsync(payment.StripeSessionId);
-
-            if (session.PaymentStatus == "paid")
+            var payment = await _paymentRepository.GetByOrderIdAsync(orderId);
+            if (payment == null)
             {
-                payment.Status = "Succeeded";
-                await _context.SaveChangesAsync();
-                await NotifyOrderServiceAsync(orderId, payment.Status);
-                return true;
+                _logger.LogWarning("No payment found for OrderId: {OrderId}", orderId);
+                return new PaymentConfirmationResult { Status = "NotFound" };
             }
 
-            payment.Status = "Failed";
-            await _context.SaveChangesAsync();
-            await NotifyOrderServiceAsync(orderId, payment.Status);
-            return false;
+            if (payment.Status == PaymentStatus.Completed)
+            {
+                _logger.LogInformation("Payment already completed for OrderId: {OrderId}", orderId);
+                return new PaymentConfirmationResult { Status = "AlreadyCompleted" };
+            }
+
+            if (string.IsNullOrEmpty(payment.TransactionId))
+            {
+                _logger.LogWarning("No Stripe session ID found for OrderId: {OrderId}", orderId);
+                return new PaymentConfirmationResult { Status = "NotPaid" };
+            }
+
+            var service = new SessionService();
+            var session = await service.GetAsync(payment.TransactionId);
+
+            if (session.PaymentStatus != "paid")
+            {
+                _logger.LogWarning("Payment not completed for OrderId: {OrderId}, SessionId: {SessionId}",
+                    orderId, session.Id);
+                return new PaymentConfirmationResult { Status = "NotPaid" };
+            }
+
+            payment.Status = PaymentStatus.Completed;
+            payment.UpdatedAt = DateTime.UtcNow;
+            await _paymentRepository.UpdateAsync(payment);
+
+            _logger.LogInformation("Updated payment status to {Status} for OrderId: {OrderId}",
+                payment.Status, orderId);
+
+            // Notify OrderService about the payment status
+            var success = await _orderServiceClient.UpdatePaymentStatusAsync(
+                orderId,
+                payment.Id.ToString(),
+                payment.TransactionId,
+                payment.Status.ToString(),
+                "Payment completed via Stripe");
+
+            if (!success)
+            {
+                _logger.LogWarning("Failed to update order status for OrderId: {OrderId}", orderId);
+                return new PaymentConfirmationResult { Status = "OrderUpdateFailed" };
+            }
+
+            return new PaymentConfirmationResult { Status = "Success" };
         }
 
-        private async Task NotifyOrderServiceAsync(int orderId, string status)
+        public async Task<Payment?> GetPaymentByOrderIdAsync(int orderId)
         {
-            var updateRequest = new
-            {
-                OrderId = orderId,
-                PaymentStatus = status
-            };
-
-            var response = await _http.PostAsJsonAsync("https://localhost:7038/api/order/update-payment-status", updateRequest);
-            
-            if (!response.IsSuccessStatusCode)
-                _logger.LogWarning("Failed to update order status for OrderId {OrderId}", orderId);
+            return await _paymentRepository.GetByOrderIdAsync(orderId);
         }
     }
 }

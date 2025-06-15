@@ -1,9 +1,11 @@
 ﻿using PaymentService.DTO;
+using PaymentService.Models;
 
 namespace PaymentService.Services;
 
 public interface IStripePaymentService
 {
     Task<string> CreateCheckoutSessionAsync(StripeCheckoutRequest request);
-    Task<bool> ConfirmCheckoutByOrderAsync(int orderId);
+    Task<PaymentConfirmationResult> ConfirmCheckoutByOrderAsync(int orderId);
+    Task<Payment?> GetPaymentByOrderIdAsync(int orderId);
 }
