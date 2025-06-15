@@ -55,6 +55,11 @@ public class PaymentRepository : IPaymentRepository
         return existingPayment;
     }
 
+    public async Task<Payment?> GetByTransactionIdAsync(string transactionId)
+    {
+        return await _context.Payments.FirstOrDefaultAsync(p => p.TransactionId == transactionId);
+    }
+
     public async Task<bool> DeleteAsync(int id)
     {
         var payment = await _context.Payments.FindAsync(id);
